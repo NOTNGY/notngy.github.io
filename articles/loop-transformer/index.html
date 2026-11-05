@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="NOTNGY 的 Loop Transformer 技术分享：基础概念、步长与门控、并行负载，以及 YOCO 与 YOCO-U。">
+  <meta name="author" content="NOTNGY">
+  <meta name="color-scheme" content="light">
+  <meta property="og:title" content="Loop Transformer">
+  <meta property="og:description" content="NOTNGY · Technical Sharing">
+  <meta property="og:type" content="article">
+  <link rel="canonical" href="https://notngy.github.io/articles/loop-transformer/">
+  <title>Loop Transformer · NOTNGY</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="article.css">
+</head>
+<body id="top">
+  <a class="skip-link" href="#content">跳到正文</a>
+  <header class="wrap site-header technical-width">
+    <a class="wordmark" href="/" aria-label="NOTNGY 首页">NOTNGY.</a>
+    <nav aria-label="主导航"><a href="/#articles">文章</a><a href="https://github.com/NOTNGY">GitHub ↗</a></nav>
+  </header>
+  <main class="technical-width wrap">
+    <header class="technical-header">
+      <a class="back-link" href="/#articles">← 返回文章目录</a>
+      <p class="eyebrow">ARCHITECTURE / REASONING / SYSTEMS</p>
+      <h1>Loop Transformer</h1>
+      <p class="subtitle">NOTNGY · Technical Sharing</p>
+      <p class="dek">从参数共享到自适应计算，再到并行负载与 KV cache。</p>
+      <div class="article-meta"><time datetime="2026-11-05">2026.11.05</time><span>技术分享 · 8 个章节</span><a href="loop-transformer.pdf">查看原 PDF ↗</a></div>
+    </header>
+    <div class="reading-layout">
+      <aside class="toc"><nav aria-label="文章目录"><p>ON THIS PAGE</p><ol><li><a href="#overview"><span>01</span>从堆叠到循环</a></li><li><a href="#basics"><span>02</span>基础概念与计算量</a></li><li><a href="#steps"><span>03</span>步长与阶段感知</a></li><li><a href="#halting"><span>04</span>门控与提前退出</a></li><li><a href="#workloads"><span>05</span>访存与并行负载</a></li><li><a href="#yoco"><span>06</span>YOCO 与 YOCO-U</a></li><li><a href="#summary"><span>07</span>总结</a></li><li><a href="#references"><span>08</span>研究脉络与参考</a></li></ol></nav></aside>
+      <article id="content" class="technical-content" aria-label="Loop Transformer 技术分享">
+<section id="overview"><p class="section-kicker">01 / OVERVIEW</p><h2>从堆叠到循环</h2>
+<p>标准 Transformer 通过逐层堆叠增加模型深度；Loop Transformer 则重复执行一组固定的 Transformer 层，在不同迭代中复用相同参数，以增加有效计算深度。</p>
+<div class="takeaway"><strong>更深的计算，不一定需要更多参数。</strong><p>把“有多少层参数”和“执行多少层计算”分开，是理解循环架构的起点。</p></div>
+<p>这份技术分享围绕四个问题展开：什么是 Loop Transformer？它带来哪些优势与缺陷？它如何影响负载与仿真建模？近期研究又在解决什么问题？</p>
+</section>
+<section id="basics"><p class="section-kicker">02 / BASICS</p><h2>基础概念与计算量</h2>
+<p>Loop Transformer 也称 <strong>Looped Transformer</strong> 或 <strong>Recurrent-Depth Transformer</strong>。根据循环粒度，可以分为三种形式：</p>
+<dl class="concepts"><div><dt>Model Loop</dt><dd>重复执行整个模型中的 Transformer 层组。</dd></div><div><dt>Block Loop</dt><dd>对包含若干层的局部模块进行循环。</dd></div><div><dt>Layer Loop</dt><dd>单层重复执行，再进入下一层。</dd></div></dl>
+<figure>
+      <a class="figure-link" href="images/loop-types.webp" target="_blank" rel="noopener" aria-label="放大查看：Model Loop、Block Loop 与 Layer Loop 的参数共享范围和循环路径"><img src="images/loop-types.webp" width="1891" height="443" loading="lazy" decoding="async" alt="Model Loop、Block Loop 与 Layer Loop 的参数共享范围和循环路径"></a>
+      <figcaption>三种循环粒度，蓝色回路表示重复执行的范围。 <a href="loop-transformer.pdf#page=8">原稿第 8 页 ↗</a></figcaption>
+    </figure>
+<h3>参数减少，计算与缓存如何变化？</h3>
+<p>记 <var>L</var> 为普通 Transformer 的层数，<var>W</var> 为循环窗口大小（每次循环包含的层数），<var>T</var> 为循环次数。<var>E</var> 是嵌入层等固定参数，<var>P</var>、<var>C</var>、<var>K</var> 分别表示单层参数量、计算量和 KV cache。</p>
+<div class="table-scroll" role="region" aria-label="原稿中的简化对比（第 9 页）" tabindex="0"><table><caption>原稿中的简化对比（第 9 页）</caption><thead><tr><th scope="col">对比项</th><th scope="col">Transformer</th><th scope="col">Loop Transformer</th></tr></thead><tbody><tr><th scope="row">参数层数</th><td>L</td><td>W（通常 W ≪ L）</td></tr><tr><th scope="row">计算层数</th><td>L</td><td>W × T</td></tr><tr><th scope="row">总参数量</th><td>E + P × L</td><td>E + P × W</td></tr><tr><th scope="row">计算量</th><td>C × L</td><td>C × W × T</td></tr><tr><th scope="row">KV cache</th><td>K × L</td><td>K × W × T</td></tr></tbody></table></div>
+<p>在 <var>W × T = L</var> 的计算深度下，循环模块可以使用更少参数。但<strong>参数共享并不自动等于 KV cache 共享</strong>：不同循环轮次的状态仍可能需要分别缓存。</p>
+<h3>参数更少，能力会损失多少？</h3>
+<p>原稿使用 LoopFormer 的实验讨论参数量、计算预算与模型能力之间的权衡。是否能用循环弥补参数减少带来的影响，需要结合具体模型、训练方式与任务评估。</p>
+<figure>
+      <a class="figure-link" href="images/loopformer-results.webp" target="_blank" rel="noopener" aria-label="放大查看：LoopFormer 在固定计算预算下的参数量、困惑度及语言任务准确率对比表"><img src="images/loopformer-results.webp" width="1766" height="653" loading="lazy" decoding="async" alt="LoopFormer 在固定计算预算下的参数量、困惑度及语言任务准确率对比表"></a>
+      <figcaption>LoopFormer 实验对比。保留原表，点击图片可放大查看。 <a href="loop-transformer.pdf#page=10">原稿第 10 页 ↗</a></figcaption>
+    </figure></section>
+<section id="steps"><p class="section-kicker">03 / STEP CONDITIONING</p><h2>步长与阶段感知</h2>
+<p>共享同一组参数，并不意味着每轮计算都必须采用完全相同的输入条件。原稿列出三种逐步增加阶段信息的方式。</p>
+<h3>共享层的直接循环</h3><div class="equation">h<sub>k+1</sub> = F<sub>θ</sub>(h<sub>k</sub>)</div>
+<p>每一轮将当前隐状态交给同一个参数化变换。</p>
+<h3>Learned Step Embedding</h3><div class="equation">h<sub>k+1</sub> = F<sub>θ</sub>(h<sub>k</sub> + e<sub>k</sub>)</div>
+<p><var>e<sub>k</sub></var> 是第 <var>k</var> 次循环对应的可学习向量，以逐元素相加的方式赋予共享层阶段感知能力。</p>
+<h3>Time + Step Size Conditioning</h3><div class="equation">h<sub>k+1</sub> = F<sub>θ</sub>(h<sub>k</sub>, t<sub>k</sub>, Δt<sub>k</sub>)</div>
+<p>LoopFormer 引入当前时间位置 <var>t<sub>k</sub></var> 和本次前进的步长 <var>Δt<sub>k</sub></var>。原稿采用从 <var>t<sub>0</sub> = 0</var> 到 <var>t<sub>M</sub> = 1</var> 的表示。</p>
+</section>
+<section id="halting"><p class="section-kicker">04 / ADAPTIVE COMPUTE</p><h2>门控与提前退出</h2>
+<p><strong>Halting gate / Early-Exit</strong> 用来打破固定循环次数，让模型根据状态决定何时退出。它决定“还要计算几轮”，与上一节的阶段信息共同构成自适应计算机制。</p>
+<figure>
+      <a class="figure-link" href="images/halting.webp" target="_blank" rel="noopener" aria-label="放大查看：循环 Transformer 在反馈路径中加入 Halting gate 以判断是否继续执行"><img src="images/halting.webp" width="1766" height="615" loading="lazy" decoding="async" alt="循环 Transformer 在反馈路径中加入 Halting gate 以判断是否继续执行"></a>
+      <figcaption>门控位于循环反馈路径中。 <a href="loop-transformer.pdf#page=13">原稿第 13 页 ↗</a></figcaption>
+    </figure>
+<h3>自适应计算时间：ACT</h3>
+<p>Universal Transformer 中的 Adaptive Computation Time 使用可学习的门控概率：</p>
+<div class="equation">p<sub>k</sub> = σ(W<sub>h</sub>h<sub>k</sub> + b<sub>h</sub>)</div>
+<p>当累积概率超过 <var>1 − ε</var> 时结束循环。最终状态由各轮隐状态加权聚合：</p>
+<div class="equation">h<sub>final</sub> = ∑<sub>k=1</sub><sup>N−1</sup> p<sub>k</sub>h<sup>(k)</sup> + R · h<sup>(N)</sup></div>
+<p>其中 <var>N</var> 是退出时的循环次数，<var>R = 1 − ∑<sub>k=1</sub><sup>N−1</sup> p<sub>k</sub></var> 是最后一轮的剩余权重。原稿关注的性能问题是：保留多轮 <var>h<sub>k</sub></var> 会增加显存占用。</p>
+<h3>阈值置信度门控</h3>
+<p>原稿以 AMOR 为例，利用输出概率分布的香农熵判断是否继续计算：</p>
+<div class="equation">H(p<sup>(k)</sup>) = −∑<sub>i=1</sub><sup>V</sup> p<sub>i</sub><sup>(k)</sup> ln p<sub>i</sub><sup>(k)</sup></div>
+<p><var>p<sub>i</sub></var> 表示词表中第 <var>i</var> 个词的概率。当 <var>H &lt; τ</var> 时，预测分布足够集中，触发退出。</p>
+<h3>门控本身的计算开销</h3>
+<p>以下沿用原稿的 FLOPs 估算口径。记 <var>d</var> 为隐藏维度，<var>S</var> 为序列长度，<var>T</var> 为步数，<var>V</var> 为词表大小，<var>T<sub>max</sub></var> 为最大循环步数。</p>
+<div class="table-scroll" role="region" aria-label="门控计算开销（原稿第 15、18 页）" tabindex="0"><table><caption>门控计算开销（原稿第 15、18 页）</caption><thead><tr><th scope="col">机制</th><th scope="col">计算项</th><th scope="col">原稿估算</th></tr></thead><tbody><tr><th scope="row">ACT · Cube</th><td>前向投影</td><td>2dST</td></tr><tr><th scope="row">ACT · Cube</th><td>反向投影梯度</td><td>4dST</td></tr><tr><th scope="row">ACT · Vector</th><td>前向特征加权聚合</td><td>2dST</td></tr><tr><th scope="row">ACT · Vector</th><td>反向特征加权回传</td><td>2dST</td></tr><tr><th scope="row">置信度 · Cube</th><td>前向投影</td><td>2dVST</td></tr><tr><th scope="row">置信度 · Cube</th><td>反向对特征求导</td><td>2dVST</td></tr><tr><th scope="row">置信度 · Cube</th><td>反向对权重求导</td><td>2dVST</td></tr><tr><th scope="row">置信度 · Vector</th><td>前向 Softmax</td><td>3VST</td></tr><tr><th scope="row">置信度 · Vector</th><td>反向交叉熵损失求导</td><td>VSTₘₐₓ</td></tr></tbody></table></div>
+<p class="small-note">Softmax 的找最大值、指数、求和与归一化，以及交叉熵中的“预测概率减去 One-hot 标签”，均沿用原稿说明；上述数字是原稿的估算口径。</p>
+<h3>Decode 时，退出轮数不同怎么办？</h3>
+<p>如果前一个 token 在第 3 轮退出，而下一个 token 需要第 4 轮计算，就会出现缺少对应轮次 KV cache 的问题。</p>
+<p>原稿给出<strong>状态冻结广播</strong>这一处理思路：将已退出 token 的状态视为收敛状态，通过显存虚拟指针映射，让后续轮次的 KV cache 指向第 3 轮的缓存。</p>
+</section>
+<section id="workloads"><p class="section-kicker">05 / SYSTEMS & WORKLOADS</p><h2>访存与并行负载</h2>
+<h3>参数访问顺序发生变化</h3>
+<p>循环改变了参数的复用时序。Block Loop 以模块为单位重复，Layer Loop 则在相邻轮次持续复用同一层参数。</p>
+<div class="sequences"><div><span>Transformer</span><code>A B C D E F G H I</code></div><div><span>Block Loop</span><code>A B C · A B C · A B C</code></div><div><span>Layer Loop</span><code>A A A · B B B · C C C</code></div></div>
+<h3>PP：循环是否跨越 stage？</h3>
+<ul><li><strong>循环完全位于一个 stage 内：</strong>可视为更大的局部计算，重点关注 stage 时长与激活容量。</li><li><strong>Block Loop 跨越多个 stage：</strong>原来的单次顺序前向不再完整描述计算路径，需要重新适配 1F1B 调度。</li></ul>
+<figure>
+      <a class="figure-link" href="images/pp-before.webp" target="_blank" rel="noopener" aria-label="放大查看：传统流水线前向与反向调度图，第一段前向尚未完成完整循环"><img src="images/pp-before.webp" width="1747" height="497" loading="lazy" decoding="async" alt="传统流水线前向与反向调度图，第一段前向尚未完成完整循环"></a>
+      <figcaption>跨 stage 的循环使传统前向划分需要重新解释。 <a href="loop-transformer.pdf#page=21">原稿第 21 页 ↗</a></figcaption>
+    </figure>
+<p>原稿的处理方案是<strong>展开为虚拟 stage</strong>，调度器同时识别物理 stage 和循环轮次：</p>
+<div class="sequences"><div><span>虚拟顺序</span><code>A₁ → B₁ → A₂ → B₂</code></div><div><span>物理顺序</span><code>Device 1 → Device 2 → Device 1 → Device 2</code></div></div>
+<figure>
+      <a class="figure-link" href="images/pp-virtual.webp" target="_blank" rel="noopener" aria-label="放大查看：将两台物理设备的不同循环轮次展开为四个虚拟 stage 的调度示意"><img src="images/pp-virtual.webp" width="1747" height="443" loading="lazy" decoding="async" alt="将两台物理设备的不同循环轮次展开为四个虚拟 stage 的调度示意"></a>
+      <figcaption>虚拟 stage 为不同循环轮次提供独立的调度身份。 <a href="loop-transformer.pdf#page=22">原稿第 22 页 ↗</a></figcaption>
+    </figure>
+<h3>EP：热点专家可能持续更久</h3>
+<p>原稿用一个示意负载说明，循环可能让热点专家持续繁忙，冷门专家重复等待。示例中，不循环时各 GPU 的 token 负载为 20 / 4 / 4 / 4，循环两次后为 40 / 8 / 8 / 8。</p>
+<figure>
+      <a class="figure-link" href="images/expert-load.webp" target="_blank" rel="noopener" aria-label="放大查看：不循环与循环两次的 GPU token 负载柱状图，负载由 20/4/4/4 变为 40/8/8/8"><img src="images/expert-load.webp" width="1747" height="637" loading="lazy" decoding="async" alt="不循环与循环两次的 GPU token 负载柱状图，负载由 20/4/4/4 变为 40/8/8/8"></a>
+      <figcaption>EP 负载示例：多轮执行下热点的累计负载。 <a href="loop-transformer.pdf#page=23">原稿第 23 页 ↗</a></figcaption>
+    </figure>
+<h3>时序疲劳偏置</h3>
+<p>原稿提出使用 <strong>Temporal Fatigue Bias</strong> 记录专家在多轮计算中的使用情况，在后续路由中加入时序偏置，以缓解持续选择相同热点专家的问题。</p>
+<figure>
+      <a class="figure-link" href="images/temporal-fatigue.webp" target="_blank" rel="noopener" aria-label="放大查看：三轮路由使用记忆中的负疲劳偏置调整专家分数，避免持续偏向同一专家"><img src="images/temporal-fatigue.webp" width="1574" height="713" loading="lazy" decoding="async" alt="三轮路由使用记忆中的负疲劳偏置调整专家分数，避免持续偏向同一专家"></a>
+      <figcaption>时序疲劳偏置的路由与记忆示意。 <a href="loop-transformer.pdf#page=24">原稿第 24 页 ↗</a></figcaption>
+    </figure>
+<p>原稿同时指出，Aux Loss Free 式的全局调节需要关注两个问题：</p>
+<ol><li><strong>延迟反馈带来的钟摆效应：</strong>前一轮很热的专家，下一轮可能被压得过冷。</li><li><strong>全局标量对不同阶段的误伤：</strong>某专家可能对浅层基础表征很重要，不能只为均衡负载而强行改选更适合深层的专家。</li></ol>
+</section>
+<section id="yoco"><p class="section-kicker">06 / CACHE & DEPTH</p><h2>YOCO 与 YOCO-U</h2>
+<h3>YOCO：You Only Cache Once</h3>
+<p>YOCO 采用 <strong>Decoder-Decoder</strong> 架构，分为 Self-Decoder 和 Cross-Decoder。前者生成全局 KV cache，后者通过交叉注意力共享读取这份缓存。</p>
+<figure>
+      <a class="figure-link" href="images/yoco.webp" target="_blank" rel="noopener" aria-label="放大查看：YOCO 的 Self-Decoder 生成全局 KV cache，Cross-Decoder 的各层共享读取缓存"><img src="images/yoco.webp" width="1785" height="508" loading="lazy" decoding="async" alt="YOCO 的 Self-Decoder 生成全局 KV cache，Cross-Decoder 的各层共享读取缓存"></a>
+      <figcaption>YOCO 将生成缓存与读取缓存的职责分开。 <a href="loop-transformer.pdf#page=26">原稿第 26 页 ↗</a></figcaption>
+    </figure>
+<p>前半段 Self-Decoder 采用 Efficient Self-Attention（ESA）。原稿以滑动窗口注意力 SWA 为例，对比它与全局因果注意力的缓存增长：在固定窗口下，局部缓存不随序列长度持续线性增加。</p>
+<figure>
+      <a class="figure-link" href="images/attention.webp" target="_blank" rel="noopener" aria-label="放大查看：全局因果注意力与 ESA 滑动窗口注意力的覆盖范围对比"><img src="images/attention.webp" width="1622" height="691" loading="lazy" decoding="async" alt="全局因果注意力与 ESA 滑动窗口注意力的覆盖范围对比"></a>
+      <figcaption>全局因果注意力与 ESA（SWA）示意；此处比较的是相应注意力部分的缓存。 <a href="loop-transformer.pdf#page=27">原稿第 27 页 ↗</a></figcaption>
+    </figure>
+<h3>YOCO-U：在 Self-Decoder 中加入循环</h3>
+<p>YOCO-U（Universal）在 YOCO 的 Self-Decoder 中引入循环，将参数复用与缓存共享结合起来。</p>
+<figure>
+      <a class="figure-link" href="images/yoco-u.webp" target="_blank" rel="noopener" aria-label="放大查看：YOCO-U 在 Self-Decoder 上增加反馈回路，Cross-Decoder 继续读取共享 KV cache"><img src="images/yoco-u.webp" width="1785" height="508" loading="lazy" decoding="async" alt="YOCO-U 在 Self-Decoder 上增加反馈回路，Cross-Decoder 继续读取共享 KV cache"></a>
+      <figcaption>YOCO-U 的循环范围与共享缓存路径。 <a href="loop-transformer.pdf#page=29">原稿第 29 页 ↗</a></figcaption>
+    </figure><figure class="narrow-figure">
+      <a class="figure-link" href="images/yoco-u-detail.webp" target="_blank" rel="noopener" aria-label="放大查看：YOCO-U 论文结构图：Self-Decoder 循环 T 次，再由 Cross-Attention 读取缓存"><img src="images/yoco-u-detail.webp" width="749" height="778" loading="lazy" decoding="async" alt="YOCO-U 论文结构图：Self-Decoder 循环 T 次，再由 Cross-Attention 读取缓存"></a>
+      <figcaption>原稿引用的 YOCO-U 结构图。 <a href="loop-transformer.pdf#page=30">原稿第 30 页 ↗</a></figcaption>
+    </figure>
+<h3>原稿中的实验对比</h3>
+<p>原稿展示了 1.3B Dense 模型、20B 训练 tokens 设置下的结果，并标注普通 20 层、20 层循环两次，以及“10 层循环三次 + 10 层”等计算结构。</p>
+<figure>
+      <a class="figure-link" href="images/yoco-u-results.webp" target="_blank" rel="noopener" aria-label="放大查看：1.3B Dense 模型在 20B 训练 tokens 下的 YOCO-U 与其他模型实验表及深度标注"><img src="images/yoco-u-results.webp" width="1795" height="799" loading="lazy" decoding="async" alt="1.3B Dense 模型在 20B 训练 tokens 下的 YOCO-U 与其他模型实验表及深度标注"></a>
+      <figcaption>YOCO-U 实验表及原稿的层数、循环次数标注。 <a href="loop-transformer.pdf#page=31">原稿第 31 页 ↗</a></figcaption>
+    </figure>
+<h3>四种架构的简化比较</h3>
+<p>下表沿用原稿第 32 页的符号。<var>C</var> 与 <var>c</var> 区分两类 decoder 层的计算量，<var>K</var> 与 <var>k</var> 区分全局缓存及相应局部缓存项。</p>
+<div class="table-scroll" role="region" aria-label="架构、计算与缓存对照（原稿第 32 页）" tabindex="0"><table class="wide-table"><caption>架构、计算与缓存对照（原稿第 32 页）</caption><thead><tr><th scope="col">对比项</th><th scope="col">Transformer</th><th scope="col">Loop Transformer</th><th scope="col">YOCO</th><th scope="col">YOCO-U</th></tr></thead><tbody><tr><th scope="row">参数层数</th><td>L</td><td>W</td><td>L</td><td>W + L/2</td></tr><tr><th scope="row">计算层数</th><td>L</td><td>W × T</td><td>L</td><td>W × T + L/2</td></tr><tr><th scope="row">总参数量</th><td>E + P × L</td><td>E + P × W</td><td>E + P × L</td><td>E + P × W + P × (L/2)</td></tr><tr><th scope="row">计算量</th><td>C × L</td><td>C × W × T</td><td>C × (L/2) + c × (L/2)</td><td>C × (W × T) + c × (L/2)</td></tr><tr><th scope="row">KV cache</th><td>K × L</td><td>K × W × T</td><td>K + (L/2) × k</td><td>K + (W × T) × k</td></tr></tbody></table></div>
+</section>
+<section id="summary"><p class="section-kicker">07 / TAKEAWAYS</p><h2>总结</h2>
+<ol class="takeaways"><li><strong>用循环增加有效深度。</strong>Model Loop、Block Loop、Layer Loop 以不同粒度复用 Transformer 参数。</li><li><strong>节省参数，不代表没有代价。</strong>模型能力、执行时延与多轮 KV cache 都需要结合具体实现权衡。</li><li><strong>负载模型需要感知循环。</strong>参数访问顺序、跨 stage 调度与专家负载都会受到影响。</li><li><strong>研究在两个方向上推进。</strong>步长与门控改善计算分配；YOCO-U 等架构探索循环与缓存效率的结合。</li></ol>
+</section>
+<section id="references"><p class="section-kicker">08 / FURTHER READING</p><h2>研究脉络与参考</h2>
+<p>原稿的时间线从 2018 年 Universal Transformer，经过 2023 年的算法学习研究、2025 年的 latent reasoning，延伸到 2026 年的循环训练、自适应计算与缓存架构。以下保留原稿提供的论文名称与 arXiv 编号，供进一步阅读。</p>
+<ol class="references">
+<li><span>核心机制 · 2018</span><a href="https://arxiv.org/abs/1807.03819">Universal Transformers</a><small>arXiv: 1807.03819</small></li>
+<li><span>算法学习 · 2023</span><a href="https://arxiv.org/abs/2311.12424">Looped Transformers 的算法学习研究</a><small>arXiv: 2311.12424（原稿时间线中的 Algorithms）</small></li>
+<li><span>循环深度与推理</span><a href="https://arxiv.org/abs/2502.05171">Scaling up Test-Time Compute with Latent Reasoning: A Recurrent Depth Approach</a><small>arXiv: 2502.05171</small></li>
+<li><span>循环预训练</span><a href="https://arxiv.org/abs/2502.17416">Reasoning with Latent Thoughts: On the Power of Looped Transformers</a><small>arXiv: 2502.17416</small></li>
+<li><span>稳定性与训练效率</span><a href="https://arxiv.org/abs/2606.18524">On the Residual Scaling of Looped Transformers: Stability and Transferability</a><small>arXiv: 2606.18524</small></li>
+<li><span>自适应计算</span><a href="https://arxiv.org/abs/2602.11451">LoopFormer: Elastic-Depth Looped Transformers for Latent Reasoning via Shortcut Modulation</a><small>arXiv: 2602.11451</small></li>
+<li><span>置信度门控</span><a href="https://arxiv.org/abs/2602.13215">AMOR</a><small>arXiv: 2602.13215</small></li>
+<li><span>部署效率</span><a href="https://arxiv.org/abs/2606.18023">LoopCoder-v2: Only Loop Once for Efficient Test-Time Computation Scaling</a><small>arXiv: 2606.18023</small></li>
+<li><span>缓存与能力</span><a href="https://arxiv.org/abs/2604.01220">YOCO-U: Universal YOCO for Efficient Depth Scaling</a><small>arXiv: 2604.01220</small></li>
+</ol>
+<div class="source-note"><strong>原始文稿</strong><p>根据 NOTNGY 提供的 34 页《LoopTransformer_展开》整理。网页合并了展开演示中的重复步骤，保留主要内容、公式与关键图表；图表和实验结果来自原稿。</p><a href="loop-transformer.pdf" download>下载完整 PDF（约 1 MB） ↓</a><p class="small-note">技术分享：NOTNGY · 网页整理与实现：GPT</p></div>
+</section>
+
+      <div class="article-bottom"><a href="/#articles">← 返回文章目录</a><a href="#top">回到顶部 ↑</a></div>
+      </article>
+    </div>
+  </main>
+  <footer class="wrap site-footer technical-width"><span>NOTNGY · Technical Sharing</span><span>页面制作：GPT · GitHub Pages</span></footer>
+</body>
+</html>

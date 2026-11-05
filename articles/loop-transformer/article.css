@@ -1,0 +1,70 @@
+.technical-width { max-width: 1120px; width: min(100% - 64px, 1120px); }
+.skip-link { position: absolute; top: -80px; left: 20px; padding: 10px 18px; background: #fff; z-index: 10; }
+.skip-link:focus { top: 12px; }
+.technical-header { max-width: 860px; padding: 32px 0 38px; }
+.technical-header .eyebrow { margin: 36px 0 14px; }
+.technical-header h1 { font-size: clamp(30px, 4vw, 44px); line-height: 1.25; letter-spacing: -.035em; }
+.subtitle { margin: 14px 0 0; color: #397a5b; font-size: 16px; font-weight: 500; letter-spacing: .02em; }
+.dek { margin: 24px 0 18px; color: #647268; font-size: 15px; line-height: 1.9; }
+.technical-header .article-meta { gap: 8px 20px; }
+.reading-layout { display: grid; grid-template-columns: 185px minmax(0, 1fr); gap: 44px; padding-bottom: 64px; border-top: 1px solid #dce1d7; }
+.toc { padding-top: 32px; }
+.toc nav { display: block; position: sticky; top: 28px; }
+.toc p { margin: 0 0 16px; color: #7b867c; font-size: 10px; letter-spacing: .14em; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin-bottom: 6px; }
+.toc a { display: flex; gap: 12px; padding-block: 7px; line-height: 1.6; font-size: 12px; }
+.toc a span { font-size: 10px; color: #89968b; padding-top: 2px; }
+.technical-content { min-width: 0; color: #37473c; font-size: 15px; line-height: 1.95; }
+.technical-content section { padding-block: 34px 10px; scroll-margin-top: 24px; }
+.technical-content section + section { border-top: 1px solid #dce1d7; margin-top: 24px; }
+.section-kicker { color: #738775; font-size: 10px; letter-spacing: .13em; margin: 0 0 10px !important; }
+.technical-content h2 { margin: 0 0 22px; font-size: 25px; line-height: 1.5; font-weight: 650; letter-spacing: -.02em; }
+.technical-content h3 { margin: 32px 0 14px; font-size: 18px; line-height: 1.6; font-weight: 600; }
+.technical-content p { margin: 0 0 20px; }
+.technical-content ul, .technical-content ol { padding-left: 22px; }
+.technical-content li { margin-bottom: 14px; padding-left: 3px; }
+.technical-content strong { color: #293b31; font-weight: 650; }
+.takeaway { background: #eaf0e6; border-left: 3px solid #6e9473; padding: 22px 24px; margin-block: 26px; }
+.takeaway strong { font-size: 18px; }
+.takeaway p { margin: 8px 0 0; color: #647268; font-size: 14px; }
+.concepts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 24px 0; }
+.concepts div { border-top: 2px solid #afc4ac; padding: 14px 8px 0 0; }
+.concepts dt { font-size: 14px; font-weight: 650; }
+.concepts dd { margin: 8px 0 0; color: #647268; font-size: 13px; line-height: 1.8; }
+figure { margin: 28px 0; }
+.figure-link { display: block; border: 1px solid #e0e4da; padding: 12px; background: #fff; border-radius: 8px; }
+.figure-link img { display: block; width: 100%; height: auto; }
+figcaption { margin-top: 10px; color: #7a857a; font-size: 11px; line-height: 1.8; }
+figcaption a { white-space: nowrap; margin-left: 4px; }
+.narrow-figure .figure-link { max-width: 350px; margin-inline: auto; }
+.table-scroll { overflow-x: auto; margin: 24px 0; border: 1px solid #dce1d7; border-radius: 8px; background: #fafbf7; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.75; text-align: left; min-width: 520px; }
+caption { text-align: left; padding: 14px 16px; font-size: 11px; color: #71816f; }
+th,td { padding: 13px 16px; border-top: 1px solid #dce1d7; vertical-align: top; }
+thead th { background: #eaf0e6; font-size: 11px; font-weight: 600; }
+tbody th { font-weight: 500; color: #647268; }
+tbody tr:last-child td { color: #397a5b; }
+.wide-table { min-width: 860px; }
+.equation { margin: 20px 0; padding: 20px; text-align: center; overflow-x: auto; white-space: nowrap; background: #eeefe8; border-radius: 7px; color: #293b31; font-family: "Cambria Math", "Times New Roman", serif; font-size: 20px; line-height: 1.8; }
+.equation sub,.equation sup { font-size: .65em; }
+var { font-family: "Cambria Math", "Times New Roman", serif; }
+.small-note { font-size: 12px; color: #778178; line-height: 1.9; }
+.sequences { margin-block: 24px; padding: 8px 20px; background: #eeefe8; border-radius: 7px; }
+.sequences div { padding-block: 12px; }
+.sequences div + div { border-top: 1px solid #dce1d7; }
+.sequences span { display: block; font-size: 10px; color: #778178; margin-bottom: 5px; }
+.sequences code { display: block; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: nowrap; color: #397a5b; }
+.takeaways li { padding-bottom: 12px; }
+.references { list-style: none; padding-left: 0 !important; }
+.references li { border-bottom: 1px solid #dce1d7; padding: 14px 0 20px; margin: 0; }
+.references span,.references small { display: block; color: #778178; font-size: 11px; }
+.references a { display: block; margin-block: 6px; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.source-note { margin-top: 36px; padding: 24px; border: 1px solid #d5ddce; border-radius: 8px; }
+.source-note p { margin: 12px 0; font-size: 13px; color: #647268; }
+.source-note a { font-size: 13px; color: #397a5b; }
+.source-note .small-note { font-size: 11px; margin-bottom: 0; }
+.article-bottom { display: flex; justify-content: space-between; gap: 20px; padding-top: 36px; margin-top: 36px; border-top: 1px solid #dce1d7; font-size: 12px; color: #647268; }
+@media (max-width: 850px) { .reading-layout { grid-template-columns: minmax(0,1fr); gap: 0; } .toc { padding-top: 22px; } .toc nav { position: static; } .toc ol { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; } .toc li { margin: 0; } .toc a { padding-block: 6px; } .toc { padding-bottom: 20px; border-bottom: 1px solid #dce1d7; } }
+@media (max-width: 540px) { .technical-width { width: calc(100% - 40px); } .technical-header { padding-block: 24px 30px; } .technical-header .eyebrow { margin-top: 28px; font-size: 9px; letter-spacing: .1em; } .subtitle { font-size: 14px; } .dek { font-size: 14px; } .technical-content { font-size: 14px; } .technical-content h2 { font-size: 23px; } .technical-content h3 { font-size: 17px; } .concepts { grid-template-columns: 1fr; gap: 16px; } .concepts dd { margin-top: 4px; } .takeaway { padding: 18px; } .takeaway strong { font-size: 16px; } .figure-link { padding: 5px; } .equation { padding-inline: 12px; font-size: 18px; } .toc a { font-size: 11px; gap: 8px; } .source-note { padding: 18px; } }
+@media print { .toc,.site-header,.site-footer,.back-link,.article-bottom,.skip-link { display: none; } .technical-width { width: 100%; } .reading-layout { display: block; } .technical-header { padding-top: 0; } .technical-content section { break-inside: auto; } figure, tr, .equation { break-inside: avoid; } .table-scroll { overflow: visible; } table,.wide-table { min-width: 0; font-size: 9px; } th,td { padding: 5px; } }
